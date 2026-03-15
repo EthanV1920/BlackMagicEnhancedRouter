@@ -3,10 +3,11 @@
   line-height: 1.5;
   font-weight: 400;
   color: #f3efe6;
-  background:
+  --page-background:
     radial-gradient(circle at top left, rgba(231, 108, 66, 0.28), transparent 35%),
     radial-gradient(circle at bottom right, rgba(68, 141, 228, 0.18), transparent 30%),
     linear-gradient(160deg, #121520 0%, #171c2b 45%, #11141e 100%);
+  background: var(--page-background);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -28,10 +29,18 @@
   box-sizing: border-box;
 }
 
+html {
+  min-height: 100%;
+  background: var(--page-background);
+  background-color: #11141e;
+}
+
 body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  background: var(--page-background);
+  background-color: #11141e;
 }
 
 button,
@@ -72,6 +81,7 @@ select {
 
 #root {
   min-height: 100vh;
+  background: transparent;
 }
 
 .app-shell {
