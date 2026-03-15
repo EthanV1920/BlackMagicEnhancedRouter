@@ -72,11 +72,16 @@ export function MatrixGrid({ snapshot, disabled, onRoute }: MatrixGridProps) {
               const activeInput = getRouteForOutput(snapshot, output.index);
               const lockState = getLockForOutput(snapshot, output.index);
               const rowIsPending = snapshot.pendingRoute?.output === output.index;
-              const rowDisabled = disabled || rowIsPending || lockState === "L";
+              const rowPendingStatus =
+                rowIsPending ? snapshot.pendingRoute?.status : undefined;
+              const rowDisabled =
+                disabled || (rowPendingStatus !== undefined && rowPendingStatus !== "ambiguous") || lockState === "L";
 
               return (
                 <tr
-                  className={`matrix-row ${rowDisabled ? "matrix-row--disabled" : ""}`}
+                  className={`matrix-row ${rowDisabled ? "matrix-row--disabled" : ""} ${
+                    rowPendingStatus === "ambiguous" ? "matrix-row--ambiguous" : ""
+                  }`}
                   key={output.index}
                 >
                   <th className="matrix-row__header" scope="row">

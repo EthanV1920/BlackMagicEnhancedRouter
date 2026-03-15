@@ -29,7 +29,7 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
 
   await sessionManager.initialize();
 
-  app.register(fastifyWebsocket);
+  await app.register(fastifyWebsocket);
 
   app.get("/api/device/config", async () => ({
     config: sessionManager.getConfig(),

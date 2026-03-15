@@ -23,6 +23,7 @@ const RETRY_DELAYS_MS = [1000, 2000, 5000, 10000, 30000];
 const PING_INTERVAL_MS = 15000;
 const DEGRADED_THRESHOLD_MS = 30000;
 const ROUTE_CONFIRMATION_TIMEOUT_MS = 2000;
+const ROUTE_DUMP_REQUEST_DELAY_MS = 120;
 const ACK_TIMEOUT_MS = 2000;
 
 type SnapshotBlockFlags = {
@@ -248,6 +249,7 @@ export class DeviceSession extends EventEmitter {
       status: "awaiting_confirmation",
     };
     this.emitEvent("route.pending", { output, input, status: "awaiting_confirmation" });
+    this.requestRouteDumpSoon();
 
     this.confirmationTimer = setTimeout(() => {
       if (
@@ -399,6 +401,22 @@ export class DeviceSession extends EventEmitter {
       input: matchingRoute.input,
       matchedRequestedInput: matchingRoute.input === pendingRoute.input,
     });
+  }
+
+  private requestRouteDumpSoon() {
+    setTimeout(() => {
+      if (!this.snapshot.pendingRoute) {
+        return;
+      }
+
+      try {
+        this.sendRaw(serializeStatusDumpRequest(PROTOCOL_HEADERS.videoOutputRouting));
+      } catch (error) {
+        this.emitEvent("protocol.error", {
+          message: error instanceof Error ? error.message : "Failed to request route status dump.",
+        });
+      }
+    }, ROUTE_DUMP_REQUEST_DELAY_MS);
   }
 
   private async awaitAck() {

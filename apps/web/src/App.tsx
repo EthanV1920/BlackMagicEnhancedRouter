@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useMemo, useState } from "react";
+import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import {
   QueryClient,
   QueryClientProvider,
@@ -14,6 +14,7 @@ import {
   disconnectDevice,
   fetchDeviceConfig,
   fetchDeviceState,
+  type LiveUpdatesStatus,
   refreshDeviceState,
   requestRouteChange,
   saveDeviceConfig,
@@ -47,10 +48,33 @@ const formatEventLabel = (event: ServerEvent) => {
   return `${time} · ${event.type}`;
 };
 
+const getInitialLiveUpdatesUrl = () => {
+  const configuredUrl = import.meta.env.VITE_LIVE_UPDATES_URL;
+  if (configuredUrl) {
+    return configuredUrl;
+  }
+
+  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+  if (import.meta.env.DEV) {
+    return `${protocol}://${window.location.hostname}:3001/ws`;
+  }
+
+  return `${protocol}://${window.location.host}/ws`;
+};
+
 function AppShell() {
   const reactQueryClient = useQueryClient();
-  const [socketConnected, setSocketConnected] = useState(false);
   const [eventLog, setEventLog] = useState<ServerEvent[]>([]);
+  const [liveUpdatesOpen, setLiveUpdatesOpen] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [liveUpdatesStatus, setLiveUpdatesStatus] = useState<LiveUpdatesStatus>({
+    connected: false,
+    state: "connecting",
+    lastChangeAt: new Date().toISOString(),
+    retryAttempt: 0,
+    url: getInitialLiveUpdatesUrl(),
+  });
+  const liveUpdatesControllerRef = useRef<ReturnType<typeof createEventsSocket> | null>(null);
 
   const configQuery = useQuery({
     queryKey: ["device-config"],
@@ -61,66 +85,105 @@ function AppShell() {
     queryKey: ["device-state"],
     queryFn: fetchDeviceState,
     initialData: blankSnapshot,
+    refetchInterval: (query) => {
+      if (query.state.data?.pendingRoute) {
+        return 250;
+      }
+
+      return liveUpdatesStatus.connected ? false : 1000;
+    },
+    refetchIntervalInBackground: true,
   });
 
   useEffect(() => {
-    const socket = createEventsSocket(
+    const controller = createEventsSocket(
       (event) => {
         reactQueryClient.setQueryData(["device-state"], event.snapshot);
         startTransition(() => {
           setEventLog((current) => [event, ...current].slice(0, 10));
         });
+        setActionError(null);
       },
-      setSocketConnected,
+      setLiveUpdatesStatus,
     );
+    liveUpdatesControllerRef.current = controller;
 
     return () => {
-      socket.close();
+      controller.close();
+      liveUpdatesControllerRef.current = null;
     };
   }, [reactQueryClient]);
 
   const saveConfigMutation = useMutation({
     mutationFn: saveDeviceConfig,
     onSuccess: (config) => {
+      setActionError(null);
       reactQueryClient.setQueryData(["device-config"], config);
+    },
+    onError: (error) => {
+      setActionError(error instanceof Error ? error.message : "Failed to save device config.");
     },
   });
 
   const connectMutation = useMutation({
     mutationFn: connectDevice,
     onSuccess: (snapshot) => {
+      setActionError(null);
       reactQueryClient.setQueryData(["device-state"], snapshot);
+    },
+    onError: (error) => {
+      setActionError(error instanceof Error ? error.message : "Failed to reconnect.");
     },
   });
 
   const disconnectMutation = useMutation({
     mutationFn: disconnectDevice,
     onSuccess: (snapshot) => {
+      setActionError(null);
       reactQueryClient.setQueryData(["device-state"], snapshot);
+    },
+    onError: (error) => {
+      setActionError(error instanceof Error ? error.message : "Failed to disconnect.");
     },
   });
 
   const refreshMutation = useMutation({
     mutationFn: refreshDeviceState,
     onSuccess: (snapshot) => {
+      setActionError(null);
       reactQueryClient.setQueryData(["device-state"], snapshot);
+    },
+    onError: (error) => {
+      setActionError(error instanceof Error ? error.message : "Failed to refresh device state.");
     },
   });
 
   const routeMutation = useMutation({
     mutationFn: requestRouteChange,
     onSuccess: (snapshot) => {
+      setActionError(null);
       reactQueryClient.setQueryData(["device-state"], snapshot);
+      window.setTimeout(() => {
+        void reactQueryClient.invalidateQueries({ queryKey: ["device-state"] });
+      }, 150);
+      window.setTimeout(() => {
+        void reactQueryClient.invalidateQueries({ queryKey: ["device-state"] });
+      }, 700);
+      window.setTimeout(() => {
+        void reactQueryClient.invalidateQueries({ queryKey: ["device-state"] });
+      }, 1500);
+    },
+    onError: (error) => {
+      setActionError(error instanceof Error ? error.message : "Failed to change route.");
     },
   });
 
   const snapshot = stateQuery.data ?? blankSnapshot;
-  const isMutating =
+  const isBusy =
     saveConfigMutation.isPending ||
     connectMutation.isPending ||
     disconnectMutation.isPending ||
-    refreshMutation.isPending ||
-    routeMutation.isPending;
+    refreshMutation.isPending;
 
   const derivedState = useMemo(() => {
     const activeRoutes = snapshot.routes.length;
@@ -128,6 +191,18 @@ function AppShell() {
     const inputCount = snapshot.device.videoInputs ?? snapshot.inputs.length;
     return { activeRoutes, outputCount, inputCount };
   }, [snapshot]);
+
+  const liveUpdatesLabel =
+    liveUpdatesStatus.state === "live"
+      ? "live updates on"
+      : liveUpdatesStatus.state === "retrying"
+        ? "live updates retrying"
+        : liveUpdatesStatus.state === "connecting"
+          ? "live updates connecting"
+          : "live updates off";
+  const canRefresh = snapshot.connection.state === "connected";
+  const canDisconnect =
+    snapshot.connection.state !== "disconnected" && snapshot.connection.state !== "error";
 
   return (
     <div className="app-shell">
@@ -140,20 +215,99 @@ function AppShell() {
           <span className={`badge badge--${snapshot.connection.state}`}>
             {snapshot.connection.state}
           </span>
-          <span className={`badge ${socketConnected ? "badge--live" : "badge--offline"}`}>
-            {socketConnected ? "live updates on" : "live updates off"}
-          </span>
+          <button
+            aria-expanded={liveUpdatesOpen}
+            className={`badge badge--button ${
+              liveUpdatesStatus.connected
+                ? "badge--live"
+                : liveUpdatesStatus.state === "retrying"
+                  ? "badge--degraded"
+                  : "badge--offline"
+            }`}
+            onClick={() => setLiveUpdatesOpen((current) => !current)}
+            type="button"
+          >
+            {liveUpdatesLabel}
+          </button>
           <button onClick={() => connectMutation.mutate()} type="button">
             Reconnect
           </button>
-          <button onClick={() => refreshMutation.mutate()} type="button">
+          <button
+            disabled={!canRefresh || refreshMutation.isPending}
+            onClick={() => refreshMutation.mutate()}
+            type="button"
+          >
             Refresh
           </button>
-          <button onClick={() => disconnectMutation.mutate()} type="button">
+          <button
+            disabled={!canDisconnect || disconnectMutation.isPending}
+            onClick={() => disconnectMutation.mutate()}
+            type="button"
+          >
             Disconnect
           </button>
         </div>
       </header>
+
+      {liveUpdatesOpen ? (
+        <section className="live-updates-panel">
+          <div className="live-updates-panel__header">
+            <div>
+              <span className="eyebrow">Live updates stream</span>
+              <h2>{liveUpdatesLabel}</h2>
+            </div>
+            <button
+              className="button-secondary"
+              onClick={() => liveUpdatesControllerRef.current?.reconnect()}
+              type="button"
+            >
+              Retry stream
+            </button>
+          </div>
+          <dl className="live-updates-panel__details">
+            <div>
+              <dt>Endpoint</dt>
+              <dd>{liveUpdatesStatus.url}</dd>
+            </div>
+            <div>
+              <dt>State</dt>
+              <dd>{liveUpdatesStatus.state}</dd>
+            </div>
+            <div>
+              <dt>Last change</dt>
+              <dd>{new Date(liveUpdatesStatus.lastChangeAt).toLocaleTimeString()}</dd>
+            </div>
+            <div>
+              <dt>Retry attempt</dt>
+              <dd>{liveUpdatesStatus.retryAttempt}</dd>
+            </div>
+            <div>
+              <dt>Next retry</dt>
+              <dd>
+                {liveUpdatesStatus.nextRetryAt
+                  ? new Date(liveUpdatesStatus.nextRetryAt).toLocaleTimeString()
+                  : "None scheduled"}
+              </dd>
+            </div>
+            <div>
+              <dt>Close info</dt>
+              <dd>
+                {liveUpdatesStatus.closeCode
+                  ? `${liveUpdatesStatus.closeCode}${
+                      liveUpdatesStatus.closeReason ? ` · ${liveUpdatesStatus.closeReason}` : ""
+                    }`
+                  : "No close event yet"}
+              </dd>
+            </div>
+            <div>
+              <dt>Last error</dt>
+              <dd>{liveUpdatesStatus.lastError ?? "No browser-side WebSocket error recorded"}</dd>
+            </div>
+          </dl>
+        </section>
+      ) : null}
+
+      {actionError ? <div className="status-banner status-banner--error">{actionError}</div> : null}
 
       <StatusBanner hasConfig={Boolean(configQuery.data)} snapshot={snapshot} />
 
@@ -279,7 +433,7 @@ function AppShell() {
             </div>
             <MatrixGrid
               disabled={
-                isMutating ||
+                isBusy ||
                 snapshot.connection.state !== "connected" ||
                 snapshot.device.devicePresent !== true
               }
