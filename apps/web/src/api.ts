@@ -38,12 +38,19 @@ const getLiveUpdatesUrl = () => {
 
 const jsonRequest = async <T>(input: RequestInfo, init?: JsonRequestOptions) => {
   const { body, ...requestInit } = init ?? {};
+  const headers = new Headers(requestInit.headers ?? undefined);
+
+  if (!headers.has("Accept")) {
+    headers.set("Accept", "application/json");
+  }
+
+  if (body !== undefined && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+
   const response = await fetch(input, {
     ...requestInit,
-    headers: {
-      "Content-Type": "application/json",
-      ...(requestInit.headers ?? {}),
-    },
+    headers,
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
 

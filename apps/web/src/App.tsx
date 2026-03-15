@@ -431,10 +431,6 @@ function AppShell() {
             </span>
           </div>
           <div className="panel panel--matrix">
-            <div className="panel__heading">
-              <span className="eyebrow">Route matrix</span>
-              <h2>Outputs vs. inputs</h2>
-            </div>
             <MatrixGrid
               disabled={
                 isBusy ||
