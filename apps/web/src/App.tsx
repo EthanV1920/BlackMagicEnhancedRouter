@@ -15,7 +15,6 @@ import {
   fetchDeviceConfig,
   fetchDeviceState,
   type LiveUpdatesStatus,
-  refreshDeviceState,
   requestRouteChange,
   saveDeviceConfig,
 } from "./api";
@@ -66,6 +65,7 @@ function AppShell() {
   const reactQueryClient = useQueryClient();
   const [eventLog, setEventLog] = useState<ServerEvent[]>([]);
   const [liveUpdatesOpen, setLiveUpdatesOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth > 1100);
   const [actionError, setActionError] = useState<string | null>(null);
   const [liveUpdatesStatus, setLiveUpdatesStatus] = useState<LiveUpdatesStatus>({
     connected: false,
@@ -147,17 +147,6 @@ function AppShell() {
     },
   });
 
-  const refreshMutation = useMutation({
-    mutationFn: refreshDeviceState,
-    onSuccess: (snapshot) => {
-      setActionError(null);
-      reactQueryClient.setQueryData(["device-state"], snapshot);
-    },
-    onError: (error) => {
-      setActionError(error instanceof Error ? error.message : "Failed to refresh device state.");
-    },
-  });
-
   const routeMutation = useMutation({
     mutationFn: requestRouteChange,
     onSuccess: (snapshot) => {
@@ -182,8 +171,7 @@ function AppShell() {
   const isBusy =
     saveConfigMutation.isPending ||
     connectMutation.isPending ||
-    disconnectMutation.isPending ||
-    refreshMutation.isPending;
+    disconnectMutation.isPending;
 
   const derivedState = useMemo(() => {
     const activeRoutes = snapshot.routes.length;
@@ -200,14 +188,13 @@ function AppShell() {
         : liveUpdatesStatus.state === "connecting"
           ? "live updates connecting"
           : "live updates off";
-  const canRefresh = snapshot.connection.state === "connected";
   const canDisconnect =
     snapshot.connection.state !== "disconnected" && snapshot.connection.state !== "error";
 
   return (
     <div className="app-shell">
       <header className="topbar">
-        <div>
+        <div className="topbar__brand">
           <span className="eyebrow">Blackmagic Videohub Matrix Router</span>
           <h1>Single-device crosspoint control</h1>
         </div>
@@ -233,18 +220,19 @@ function AppShell() {
             Reconnect
           </button>
           <button
-            disabled={!canRefresh || refreshMutation.isPending}
-            onClick={() => refreshMutation.mutate()}
-            type="button"
-          >
-            Refresh
-          </button>
-          <button
             disabled={!canDisconnect || disconnectMutation.isPending}
             onClick={() => disconnectMutation.mutate()}
             type="button"
           >
             Disconnect
+          </button>
+          <button
+            aria-expanded={sidebarOpen}
+            className="button-secondary"
+            onClick={() => setSidebarOpen((current) => !current)}
+            type="button"
+          >
+            {sidebarOpen ? "Hide panels" : "Show panels"}
           </button>
         </div>
       </header>
@@ -311,8 +299,9 @@ function AppShell() {
 
       <StatusBanner hasConfig={Boolean(configQuery.data)} snapshot={snapshot} />
 
-      <main className="layout">
-        <aside className="sidebar">
+      <main className={`layout ${sidebarOpen ? "" : "layout--collapsed"}`}>
+        {sidebarOpen ? (
+          <aside className="sidebar">
           <section className="panel">
             <div className="panel__heading">
               <span className="eyebrow">Device target</span>
@@ -423,9 +412,24 @@ function AppShell() {
               )}
             </ul>
           </section>
-        </aside>
+          </aside>
+        ) : null}
 
         <section className="matrix-panel">
+          <div className="compact-strip" aria-label="Tablet summary">
+            <span className="compact-pill">
+              <strong>{snapshot.device.modelName ?? configQuery.data?.name ?? "Videohub"}</strong>
+              <small>{snapshot.connection.host ?? "No host"}</small>
+            </span>
+            <span className="compact-pill">
+              <strong>{derivedState.outputCount}x{derivedState.inputCount}</strong>
+              <small>{derivedState.activeRoutes} routes shown</small>
+            </span>
+            <span className={`compact-pill compact-pill--${snapshot.connection.state}`}>
+              <strong>{snapshot.connection.state}</strong>
+              <small>{liveUpdatesLabel}</small>
+            </span>
+          </div>
           <div className="panel panel--matrix">
             <div className="panel__heading">
               <span className="eyebrow">Route matrix</span>
