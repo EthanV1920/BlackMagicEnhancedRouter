@@ -5,4 +5,7 @@ coverage
 .turbo
 *.tsbuildinfo
 apps/web/.vite
-
+.env
+.env.*
+*.pcap
+*.pcapng

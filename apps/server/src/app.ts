@@ -3,8 +3,8 @@ import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import type {
-  DeviceConfigPayload,
   RouteMutationPayload,
+  SavedRouterPayload,
   ServerEvent,
 } from "@blackmagic-enhanced-router/shared";
 import fastify from "fastify";
@@ -31,39 +31,101 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
 
   await app.register(fastifyWebsocket);
 
-  app.get("/api/device/config", async () => ({
-    config: sessionManager.getConfig(),
+  app.get("/api/routers", async () => ({
+    ...sessionManager.listRouters(),
   }));
 
-  app.put<{ Body: DeviceConfigPayload }>("/api/device/config", async (request, reply) => {
+  app.post<{ Body: SavedRouterPayload }>("/api/routers", async (request, reply) => {
     if (!request.body.host?.trim()) {
       return reply.status(400).send({ message: "Host is required." });
     }
 
-    const config = await sessionManager.saveConfig(request.body);
-    return reply.send({ config });
+    try {
+      const result = await sessionManager.createRouter(request.body);
+      return reply.send(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to create router.";
+      const statusCode = message.includes("already exists") ? 409 : 400;
+      return reply.status(statusCode).send({ message });
+    }
   });
 
-  app.post("/api/device/connect", async () => ({
-    snapshot: await sessionManager.connect(),
-  }));
+  app.put<{ Body: SavedRouterPayload; Params: { routerId: string } }>(
+    "/api/routers/:routerId",
+    async (request, reply) => {
+      if (!request.body.host?.trim()) {
+        return reply.status(400).send({ message: "Host is required." });
+      }
+
+      try {
+        const result = await sessionManager.updateRouter(request.params.routerId, request.body);
+        return reply.send(result);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to update router.";
+        const statusCode =
+          message === "Router not found."
+            ? 404
+            : message.includes("already exists")
+              ? 409
+              : 400;
+        return reply.status(statusCode).send({ message });
+      }
+    },
+  );
+
+  app.delete<{ Params: { routerId: string } }>("/api/routers/:routerId", async (request, reply) => {
+    try {
+      const result = await sessionManager.deleteRouter(request.params.routerId);
+      return reply.send(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to delete router.";
+      const statusCode = message === "Router not found." ? 404 : 400;
+      return reply.status(statusCode).send({ message });
+    }
+  });
+
+  app.post<{ Params: { routerId: string } }>("/api/routers/:routerId/select", async (request, reply) => {
+    try {
+      return reply.send(await sessionManager.selectRouter(request.params.routerId));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to select router.";
+      const statusCode = message === "Router not found." ? 404 : 400;
+      return reply.status(statusCode).send({ message });
+    }
+  });
+
+  app.post("/api/device/connect", async (_request, reply) => {
+    try {
+      return reply.send({
+        snapshot: await sessionManager.connectSelected(),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to connect.";
+      return reply.status(400).send({ message });
+    }
+  });
 
   app.post("/api/device/disconnect", async () => ({
-    snapshot: await sessionManager.disconnect(),
+    snapshot: await sessionManager.disconnectSelected(),
   }));
 
   app.get("/api/device/state", async () => ({
-    snapshot: sessionManager.getSnapshot(),
+    snapshot: sessionManager.getActiveSnapshot(),
   }));
 
-  app.post("/api/device/refresh", async () => {
-    const snapshot = await sessionManager.refresh();
-    return { snapshot };
+  app.post("/api/device/refresh", async (_request, reply) => {
+    try {
+      const snapshot = await sessionManager.refreshSelected();
+      return { snapshot };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to refresh.";
+      return reply.status(400).send({ message });
+    }
   });
 
   app.post<{ Body: RouteMutationPayload }>("/api/routes", async (request, reply) => {
     try {
-      const snapshot = await sessionManager.route(request.body);
+      const snapshot = await sessionManager.routeSelected(request.body);
       return { snapshot };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Route request failed.";
@@ -72,6 +134,8 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
           ? 409
           : message.includes("locked")
             ? 423
+            : message === "No router selected."
+              ? 400
             : 400;
       return reply.status(statusCode).send({ message });
     }
@@ -87,8 +151,11 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
 
       send({
         type: "connection.updated",
-        snapshot: sessionManager.getSnapshot(),
+        snapshot: sessionManager.getActiveSnapshot(),
         emittedAt: new Date().toISOString(),
+        ...(sessionManager.getSelectedRouter()?.id
+          ? { routerId: sessionManager.getSelectedRouter()?.id, selectedRouterId: sessionManager.getSelectedRouter()?.id }
+          : {}),
       });
 
       const listener = (event: ServerEvent) => {

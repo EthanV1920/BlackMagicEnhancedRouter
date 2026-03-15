@@ -107,6 +107,7 @@ export class DeviceSession extends EventEmitter {
   };
 
   private readonly deviceId: string;
+  private routerId?: string;
 
   private socket?: net.Socket;
   private config?: DeviceConfig;
@@ -133,11 +134,21 @@ export class DeviceSession extends EventEmitter {
     return this.config ? { ...this.config } : null;
   }
 
+  setRouterContext(routerId?: string) {
+    this.routerId = routerId;
+  }
+
   setConfig(config: DeviceConfig | null) {
     this.config = config ?? undefined;
-    this.snapshot.connection.host = config?.host;
-    this.snapshot.connection.port = config?.port;
-    this.snapshot.connection.error = undefined;
+    this.lastSeenAt = undefined;
+    this.snapshot = {
+      ...createEmptySnapshot(),
+      connection: {
+        ...createEmptySnapshot().connection,
+        ...(config ? { host: config.host, port: config.port } : {}),
+        lastEvent: config ? "config.updated" : "config.cleared",
+      },
+    };
     this.snapshot.connection.lastEvent = config ? "config.updated" : "config.cleared";
     this.emitEvent("connection.updated");
   }
@@ -148,6 +159,15 @@ export class DeviceSession extends EventEmitter {
       return;
     }
 
+    if (this.socket) {
+      const socket = this.socket;
+      this.socket = undefined;
+      socket.removeAllListeners();
+      socket.destroy();
+    }
+
+    this.clearTimers();
+    this.rejectAckWaiter(new Error("Connection replaced."));
     this.clearReconnectTimer();
     this.shouldReconnect = true;
     this.resetSnapshotState();
@@ -608,6 +628,7 @@ export class DeviceSession extends EventEmitter {
       snapshot: this.getSnapshot(),
       ...(payload ? { payload } : {}),
       emittedAt: new Date().toISOString(),
+      ...(this.routerId ? { routerId: this.routerId } : {}),
     };
     this.emit("event", event);
   }

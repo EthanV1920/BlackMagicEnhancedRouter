@@ -1,7 +1,8 @@
 import type {
-  DeviceConfig,
-  DeviceConfigPayload,
+  RouterDirectory,
   RouteMutationPayload,
+  SavedRouter,
+  SavedRouterPayload,
   ServerEvent,
   VideohubSnapshot,
 } from "@blackmagic-enhanced-router/shared";
@@ -62,17 +63,54 @@ const jsonRequest = async <T>(input: RequestInfo, init?: JsonRequestOptions) => 
   return (await response.json()) as T;
 };
 
-export const fetchDeviceConfig = async () => {
-  const response = await jsonRequest<{ config: DeviceConfig | null }>("/api/device/config");
-  return response.config;
+export const fetchRouters = async () => {
+  const response = await jsonRequest<RouterDirectory>("/api/routers");
+  return response;
 };
 
-export const saveDeviceConfig = async (payload: DeviceConfigPayload) => {
-  const response = await jsonRequest<{ config: DeviceConfig }>("/api/device/config", {
+export const createRouter = async (payload: SavedRouterPayload) => {
+  const response = await jsonRequest<{
+    router: SavedRouter;
+    routers: RouterDirectory["routers"];
+    selectedRouterId?: string;
+  }>("/api/routers", {
+    method: "POST",
+    body: payload,
+  });
+  return response;
+};
+
+export const updateRouter = async (routerId: string, payload: SavedRouterPayload) => {
+  const response = await jsonRequest<{
+    router: SavedRouter;
+    routers: RouterDirectory["routers"];
+    selectedRouterId?: string;
+  }>(`/api/routers/${routerId}`, {
     method: "PUT",
     body: payload,
   });
-  return response.config;
+  return response;
+};
+
+export const deleteRouter = async (routerId: string) => {
+  const response = await jsonRequest<{
+    routers: RouterDirectory["routers"];
+    selectedRouterId?: string;
+    snapshot: VideohubSnapshot;
+  }>(`/api/routers/${routerId}`, {
+    method: "DELETE",
+  });
+  return response;
+};
+
+export const selectRouter = async (routerId: string) => {
+  const response = await jsonRequest<{
+    selectedRouterId: string;
+    snapshot: VideohubSnapshot;
+  }>(`/api/routers/${routerId}/select`, {
+    method: "POST",
+  });
+  return response;
 };
 
 export const fetchDeviceState = async () => {

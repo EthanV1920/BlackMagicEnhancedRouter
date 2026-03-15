@@ -86,12 +86,12 @@ describe("MatrixGrid", () => {
 
 describe("StatusBanner", () => {
   it("renders disconnected and firmware states", () => {
-    const { rerender } = render(<StatusBanner hasConfig={false} snapshot={baseSnapshot} />);
-    expect(screen.getByText(/Configure the Videohub host/)).toBeInTheDocument();
+    const { rerender } = render(<StatusBanner hasSelection={false} snapshot={baseSnapshot} />);
+    expect(screen.getByText(/Add or select a saved router/)).toBeInTheDocument();
 
     rerender(
       <StatusBanner
-        hasConfig
+        hasSelection
         snapshot={{
           ...baseSnapshot,
           device: {

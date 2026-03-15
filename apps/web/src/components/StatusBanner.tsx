@@ -1,15 +1,15 @@
 import type { VideohubSnapshot } from "@blackmagic-enhanced-router/shared";
 
 type StatusBannerProps = {
-  hasConfig: boolean;
+  hasSelection: boolean;
   snapshot: VideohubSnapshot;
 };
 
-export function StatusBanner({ hasConfig, snapshot }: StatusBannerProps) {
-  if (!hasConfig) {
+export function StatusBanner({ hasSelection, snapshot }: StatusBannerProps) {
+  if (!hasSelection) {
     return (
       <div className="status-banner status-banner--info">
-        Configure the Videohub host and port to start the routing session.
+        Add or select a saved router to start the routing session.
       </div>
     );
   }
@@ -57,11 +57,10 @@ export function StatusBanner({ hasConfig, snapshot }: StatusBannerProps) {
   if (snapshot.connection.state === "disconnected") {
     return (
       <div className="status-banner status-banner--warning">
-        Disconnected from the Videohub. Use reconnect after saving the device config.
+        Disconnected from the Videohub. Use reconnect after selecting a router.
       </div>
     );
   }
 
   return null;
 }
-

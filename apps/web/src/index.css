@@ -35,7 +35,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -60,7 +61,8 @@ button:disabled {
   cursor: not-allowed;
 }
 
-input {
+input,
+select {
   border-radius: 14px;
   border: 1px solid var(--border);
   background: rgba(8, 11, 19, 0.8);
@@ -117,6 +119,11 @@ input {
   gap: 0.75rem;
   align-items: center;
   justify-content: flex-end;
+}
+
+.topbar__router-picker {
+  min-width: 13rem;
+  max-width: 18rem;
 }
 
 .badge {
@@ -276,6 +283,12 @@ input {
   gap: 0.9rem;
 }
 
+.device-form__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
 .device-form label {
   display: grid;
   gap: 0.45rem;
@@ -285,6 +298,44 @@ input {
 .button-primary {
   background: linear-gradient(120deg, rgba(255, 139, 77, 0.35), rgba(255, 216, 138, 0.18));
   border-color: rgba(255, 216, 138, 0.3);
+}
+
+.button-danger {
+  border-color: rgba(255, 109, 109, 0.28);
+  color: #ffd1d1;
+}
+
+.saved-router-list {
+  display: grid;
+  gap: 0.45rem;
+  margin-bottom: 0.8rem;
+}
+
+.saved-router-list__item {
+  display: grid;
+  gap: 0.12rem;
+  justify-items: start;
+  text-align: left;
+  border-radius: 14px;
+  padding: 0.7rem 0.85rem;
+}
+
+.saved-router-list__item strong {
+  font-size: 0.88rem;
+}
+
+.saved-router-list__item small {
+  color: var(--text-muted);
+}
+
+.saved-router-list__item--active {
+  border-color: rgba(255, 216, 138, 0.3);
+  background: rgba(255, 216, 138, 0.08);
+}
+
+.panel__empty {
+  margin: 0;
+  color: var(--text-muted);
 }
 
 .stats-list {
@@ -662,9 +713,15 @@ input {
   }
 
   .topbar__status button,
-  .topbar__status .badge {
+  .topbar__status .badge,
+  .topbar__status .topbar__router-picker {
     font-size: 0.64rem;
     padding: 0.28rem 0.56rem;
+  }
+
+  .topbar__router-picker {
+    min-width: 8.8rem;
+    max-width: 11.5rem;
   }
 
   .status-banner,
@@ -709,6 +766,26 @@ input {
 
   .device-form input {
     padding: 0.56rem 0.68rem;
+  }
+
+  .device-form__actions {
+    gap: 0.34rem;
+  }
+
+  .saved-router-list {
+    gap: 0.28rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .saved-router-list__item {
+    border-radius: 10px;
+    padding: 0.42rem 0.52rem;
+  }
+
+  .saved-router-list__item strong,
+  .saved-router-list__item small,
+  .panel__empty {
+    font-size: 0.62rem;
   }
 
   .stats-list {

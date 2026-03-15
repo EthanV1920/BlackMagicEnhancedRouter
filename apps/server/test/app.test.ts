@@ -34,17 +34,23 @@ class MockVideohubServer {
   private readonly server = net.createServer();
   private socket?: net.Socket;
   private buffer = "";
-  private readonly inputLabels = ["Camera 1", "Camera 2"];
-  private readonly outputLabels = ["Program", "Multiview"];
+  private readonly inputLabels: [string, string];
+  private readonly outputLabels: [string, string];
   private routes = [0, 1];
   private locks: Array<"U" | "L" | "O"> = ["U", "U"];
   private routeBehavior: "ack" | "nak" = "ack";
   port = 0;
   devicePresent: "true" | "false" | "needs_update" = "true";
 
+  constructor(name: string) {
+    this.inputLabels = [`${name} Cam 1`, `${name} Cam 2`];
+    this.outputLabels = [`${name} Program`, `${name} Multiview`];
+  }
+
   async start() {
     this.server.on("connection", (socket) => {
       this.socket = socket;
+      socket.on("error", () => {});
       socket.write(this.initialDump());
       socket.on("data", (chunk) => {
         this.buffer += chunk.toString();
@@ -189,34 +195,47 @@ Video outputs: 2
 
 describe("Fastify app integration", () => {
   let tempDir: string;
-  let mockServer: MockVideohubServer;
+  let routerA: MockVideohubServer;
+  let routerB: MockVideohubServer;
 
   beforeEach(async () => {
     tempDir = await mkdtemp(path.join(os.tmpdir(), "videohub-router-"));
-    mockServer = new MockVideohubServer();
-    await mockServer.start();
+    routerA = new MockVideohubServer("A");
+    routerB = new MockVideohubServer("B");
+    await routerA.start();
+    await routerB.start();
   });
 
   afterEach(async () => {
-    await mockServer.stop();
+    await routerA.stop();
+    await routerB.stop();
     await rm(tempDir, { recursive: true, force: true });
   });
 
-  it("connects to a configured Videohub and exposes the normalized snapshot", async () => {
+  it("creates routers, auto-selects the latest, and exposes the normalized snapshot", async () => {
     const { app } = await buildApp({
-      configPath: path.join(tempDir, "device.json"),
+      configPath: path.join(tempDir, "routers.json"),
       staticRoot: path.join(tempDir, "missing-dist"),
     });
 
-    await app.inject({
-      method: "PUT",
-      url: "/api/device/config",
+    const createResponse = await app.inject({
+      method: "POST",
+      url: "/api/routers",
       payload: {
         host: "127.0.0.1",
-        port: mockServer.port,
-        name: "Test Router",
+        port: routerA.port,
+        name: "Router A",
       },
     });
+
+    expect(createResponse.statusCode).toBe(200);
+    const directory = createResponse.json() as {
+      router: { id: string };
+      routers: Array<{ id: string }>;
+      selectedRouterId?: string;
+    };
+    expect(directory.routers).toHaveLength(1);
+    expect(directory.selectedRouterId).toBe(directory.router.id);
 
     const response = await waitForReadySnapshot(app);
     const body = response.json() as {
@@ -238,18 +257,162 @@ describe("Fastify app integration", () => {
     await app.close();
   });
 
-  it("keeps route state authoritative after ACK and update", async () => {
+  it("switches between saved routers and emits router-aware events", async () => {
+    const { app, sessionManager } = await buildApp({
+      configPath: path.join(tempDir, "routers.json"),
+      staticRoot: path.join(tempDir, "missing-dist"),
+    });
+
+    const seenRouterIds = new Set<string>();
+    sessionManager.on("event", (event) => {
+      if (event.routerId) {
+        seenRouterIds.add(event.routerId);
+      }
+    });
+
+    const firstCreate = await app.inject({
+      method: "POST",
+      url: "/api/routers",
+      payload: {
+        host: "127.0.0.1",
+        port: routerA.port,
+        name: "Router A",
+      },
+    });
+    const firstBody = firstCreate.json() as { router: { id: string } };
+
+    const secondCreate = await app.inject({
+      method: "POST",
+      url: "/api/routers",
+      payload: {
+        host: "127.0.0.1",
+        port: routerB.port,
+        name: "Router B",
+      },
+    });
+    const secondBody = secondCreate.json() as { router: { id: string } };
+
+    const selectResponse = await app.inject({
+      method: "POST",
+      url: `/api/routers/${firstBody.router.id}/select`,
+    });
+
+    expect(selectResponse.statusCode).toBe(200);
+    await waitForReadySnapshot(app);
+
+    const stateResponse = await app.inject({ method: "GET", url: "/api/device/state" });
+    const body = stateResponse.json() as {
+      snapshot: {
+        inputs: Array<{ name: string }>;
+        connection: { host?: string; port?: number };
+      };
+    };
+
+    expect(body.snapshot.connection.port).toBe(routerA.port);
+    expect(body.snapshot.inputs[0]?.name).toContain("A Cam");
+    expect(seenRouterIds.has(firstBody.router.id)).toBe(true);
+    expect(seenRouterIds.has(secondBody.router.id)).toBe(true);
+
+    await app.close();
+  });
+
+  it("deletes the selected router and falls back to the next saved router", async () => {
     const { app } = await buildApp({
-      configPath: path.join(tempDir, "device.json"),
+      configPath: path.join(tempDir, "routers.json"),
+      staticRoot: path.join(tempDir, "missing-dist"),
+    });
+
+    const firstCreate = await app.inject({
+      method: "POST",
+      url: "/api/routers",
+      payload: {
+        host: "127.0.0.1",
+        port: routerA.port,
+        name: "Router A",
+      },
+    });
+    const firstBody = firstCreate.json() as { router: { id: string } };
+
+    const secondCreate = await app.inject({
+      method: "POST",
+      url: "/api/routers",
+      payload: {
+        host: "127.0.0.1",
+        port: routerB.port,
+        name: "Router B",
+      },
+    });
+    const secondBody = secondCreate.json() as { router: { id: string } };
+
+    const deleteResponse = await app.inject({
+      method: "DELETE",
+      url: `/api/routers/${secondBody.router.id}`,
+    });
+
+    expect(deleteResponse.statusCode).toBe(200);
+    const deleteBody = deleteResponse.json() as {
+      routers: Array<{ id: string }>;
+      selectedRouterId?: string;
+      snapshot: {
+        connection: { host?: string; port?: number };
+      };
+    };
+
+    expect(deleteBody.routers).toHaveLength(1);
+    expect(deleteBody.selectedRouterId).toBe(firstBody.router.id);
+    expect(deleteBody.snapshot.connection.port).toBe(routerA.port);
+
+    await app.close();
+  });
+
+  it("rejects duplicate endpoints and route requests when no router is selected", async () => {
+    const { app } = await buildApp({
+      configPath: path.join(tempDir, "routers.json"),
+      staticRoot: path.join(tempDir, "missing-dist"),
+    });
+
+    const emptyRouteResponse = await app.inject({
+      method: "POST",
+      url: "/api/routes",
+      payload: { output: 0, input: 1 },
+    });
+    expect(emptyRouteResponse.statusCode).toBe(400);
+
+    const firstCreate = await app.inject({
+      method: "POST",
+      url: "/api/routers",
+      payload: {
+        host: "127.0.0.1",
+        port: routerA.port,
+      },
+    });
+    expect(firstCreate.statusCode).toBe(200);
+
+    const duplicateCreate = await app.inject({
+      method: "POST",
+      url: "/api/routers",
+      payload: {
+        host: "127.0.0.1",
+        port: routerA.port,
+      },
+    });
+    expect(duplicateCreate.statusCode).toBe(409);
+
+    await app.close();
+  });
+
+  it("keeps route state authoritative after ACK and update for the selected router", async () => {
+    const { app } = await buildApp({
+      configPath: path.join(tempDir, "routers.json"),
       staticRoot: path.join(tempDir, "missing-dist"),
     });
 
     await app.inject({
-      method: "PUT",
-      url: "/api/device/config",
+      method: "POST",
+      url: "/api/routers",
       payload: {
         host: "127.0.0.1",
-        port: mockServer.port,
+        port: routerA.port,
       },
     });
 
@@ -278,19 +441,19 @@ describe("Fastify app integration", () => {
     await app.close();
   });
 
-  it("returns errors for rejected or locked route changes", async () => {
+  it("returns errors for rejected or locked route changes on the selected router", async () => {
     const { app } = await buildApp({
-      configPath: path.join(tempDir, "device.json"),
+      configPath: path.join(tempDir, "routers.json"),
       staticRoot: path.join(tempDir, "missing-dist"),
     });
 
-    mockServer.setLocks(["L", "U"]);
+    routerA.setLocks(["L", "U"]);
     await app.inject({
-      method: "PUT",
-      url: "/api/device/config",
+      method: "POST",
+      url: "/api/routers",
       payload: {
         host: "127.0.0.1",
-        port: mockServer.port,
+        port: routerA.port,
       },
     });
 
@@ -303,8 +466,8 @@ describe("Fastify app integration", () => {
     });
     expect(lockedResponse.statusCode).toBe(423);
 
-    mockServer.setLocks(["U", "U"]);
-    mockServer.setRouteBehavior("nak");
+    routerA.setLocks(["U", "U"]);
+    routerA.setRouteBehavior("nak");
     const nakResponse = await app.inject({
       method: "POST",
       url: "/api/routes",

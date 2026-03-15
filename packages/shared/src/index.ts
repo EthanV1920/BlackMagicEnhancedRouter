@@ -4,6 +4,30 @@ export type DeviceConfig = {
   name?: string;
 };
 
+export type SavedRouter = {
+  id: string;
+  host: string;
+  port: number;
+  name?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type SavedRouterPayload = {
+  host: string;
+  port?: number;
+  name?: string;
+};
+
+export type RouterSelection = {
+  selectedRouterId?: string;
+};
+
+export type RouterDirectory = {
+  routers: SavedRouter[];
+  selectedRouterId?: string;
+};
+
 export type ConnectionState =
   | "disconnected"
   | "connecting"
@@ -79,16 +103,11 @@ export type ServerEvent<TPayload = unknown> = {
   snapshot: VideohubSnapshot;
   payload?: TPayload;
   emittedAt: string;
-};
-
-export type DeviceConfigPayload = {
-  host: string;
-  port?: number;
-  name?: string;
+  routerId?: string;
+  selectedRouterId?: string;
 };
 
 export type RouteMutationPayload = {
   output: number;
   input: number;
 };
-
